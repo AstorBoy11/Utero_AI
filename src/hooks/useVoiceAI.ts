@@ -293,25 +293,49 @@ export const useVoiceAI = (options: UseVoiceAIOptions = {}): UseVoiceAIReturn =>
                 console.log('[STT] Recognition started - listening...');
             };
 
+            // Track which results have been finalized to avoid duplication
+            let finalizedResultsCount = 0;
+            let committedTranscript = ''; // Accumulated final results
+
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             recognition.onresult = (event: any) => {
-                let fullTranscript = '';
-
-                // Collect all results into a single transcript
-                for (let i = 0; i < event.results.length; i++) {
+                let interimTranscript = '';
+                
+                // Process only NEW results (from finalizedResultsCount onwards)
+                for (let i = finalizedResultsCount; i < event.results.length; i++) {
                     const result = event.results[i];
-                    fullTranscript += result[0].transcript;
+                    const transcript = result[0].transcript;
+                    
+                    if (result.isFinal) {
+                        // Commit this result permanently
+                        committedTranscript += (committedTranscript ? ' ' : '') + transcript.trim();
+                        finalizedResultsCount = i + 1;
+                    } else {
+                        // Interim result - show but don't commit
+                        interimTranscript += transcript;
+                    }
                 }
 
-                console.log('[STT] Current transcript:', fullTranscript);
-                setTranscript(fullTranscript);
+                // Display: committed + current interim
+                const displayTranscript = committedTranscript + (interimTranscript ? ' ' + interimTranscript : '');
+                
+                console.log('[STT] Display:', displayTranscript);
+                setTranscript(displayTranscript.trim());
 
-                // Check if the last result is final
+                // Check if we have a new final result to process
                 const lastResult = event.results[event.results.length - 1];
                 if (lastResult.isFinal) {
                     console.log('[STT] Got final result, scheduling processing with delay...');
-                    scheduleProcessing(fullTranscript);
+                    scheduleProcessing(committedTranscript);
                 }
+            };
+
+            // Reset counters when recognition starts
+            const originalOnStart = recognition.onstart;
+            recognition.onstart = () => {
+                finalizedResultsCount = 0;
+                committedTranscript = '';
+                originalOnStart?.();
             };
 
             recognition.onspeechstart = () => {
